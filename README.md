@@ -1,6 +1,6 @@
 ## Introduction
 
-哈尔滨工业大学（威海）云计算概论课程 project: OpenStack的单机部署
+哈尔滨工业大学（威海）云计算概论课程 project: OpenStack的部署
 
 ## Hardware configuration
 
