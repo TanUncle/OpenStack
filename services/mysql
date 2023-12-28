@@ -1,0 +1,74 @@
+#!/bin/bash
+PACKAGE_LIST="mariadb-server python-mysqldb"
+SERVICE_LIST="mysql"
+MYSQL_CONFIG=/etc/mysql/my.cnf
+
+func_mysql_config()
+{
+  edit_conf
+  func_service restart
+}
+
+func_mysql_service()
+{
+  sudo /etc/init.d/mysql $1
+}
+
+func_mysql_uninstall()
+{
+  echo "There some package:"
+  echo "  " $PACKAGE_LIST
+  read -p "Do you want to remove? [Y/n]" ret
+  if [ "Y" = $ret -o "y" = $ret ]; then
+    func_uninstall
+  fi
+}
+
+edit_conf()
+{
+  edit_config_file $MYSQL_CONFIG edit_mysql_config
+}
+
+edit_mysql_config()
+{
+  echo "[mysqld]"
+  echo "bind-address = 0.0.0.0"
+  echo "default-storage-engine = InnoDB"
+  echo "collation-server = utf8_general_ci"
+  echo "init-connect = 'SET NAMES utf8'"
+  echo "character-set-server = utf8"
+}
+
+# Use by other script
+
+# args: dbname
+mysql_drop()
+{
+  local DBNAME=$1
+  echo "Drop Database ${DBNAME}"
+  echo "DROP DATABASE IF EXISTS ${DBNAME};" \
+  | mysql -u${SET_MYSQL_USER} -p${SET_MYSQL_PASS}
+}
+# args: dbname password
+mysql_create()
+{
+  local DBNAME=$1
+  local DBPASS=$2
+  echo "Set Database ${DBNAME}"
+  echo "CREATE DATABASE IF NOT EXISTS ${DBNAME};
+  GRANT ALL PRIVILEGES ON ${DBNAME}.* TO '${DBNAME}'@'localhost' \
+    IDENTIFIED BY '${DBPASS}';
+  GRANT ALL PRIVILEGES ON ${DBNAME}.* TO '${DBNAME}'@'%' \
+    IDENTIFIED BY '${DBPASS}';" \
+    | mysql -u${SET_MYSQL_USER} -p${SET_MYSQL_PASS}
+}
+
+# args: dbname dbpass
+mysql_edit_conf()
+{
+  local DBNAME=$1
+  local DBPASS=$2
+
+  echo "[database]"
+  echo "connection = mysql://${DBNAME}:${DBPASS}@${SET_MYSQL_IP}:${SET_MYSQL_PORT}/${DBNAME}"
+}

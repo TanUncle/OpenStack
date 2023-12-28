@@ -1,0 +1,158 @@
+#!/bin/bash
+import $SERVICE_OPENSTACK_COMPUTE
+
+PACKAGE_LIST="neutron-server neutron-plugin-ml2 python-neutronclient\
+  neutron-plugin-ml2 neutron-plugin-openvswitch-agent \
+  neutron-l3-agent neutron-dhcp-agent ipset"
+SERVICE_LIST+=" nova-api nova-scheduler nova-conductor nova-compute neutron-server \
+  neutron-plugin-openvswitch-agent neutron-l3-agent neutron-dhcp-agent \
+  neutron-metadata-agent openvswitch-switch"
+NEUTRON_CONF_FILE=/etc/neutron/neutron.conf
+ML2_CONF_INI_FILE=/etc/neutron/plugins/ml2/ml2_conf.ini
+L3_AGENT_INI_FILE=/etc/neutron/l3_agent.ini
+DHCP_AGENT_INI_FILE=/etc/neutron/dhcp_agent.ini
+METADATA_AGENT_INI_FILE=/etc/neutron/metadata_agent.ini
+
+func_neutron_clean()
+{
+  load_admin_env
+  delete_user
+  $SERVICE_DATABASE"_drop" $SERVICE_NAME
+}
+
+func_neutron_config()
+{
+  $SERVICE_DATABASE"_create" $SERVICE_NAME $SET_NEUTRON_DBPASS
+  load_admin_env
+  delete_user
+  create_user
+  edit_conf
+  sudo  su -s /bin/sh -c "neutron-db-manage --config-file $NEUTRON_CONF_FILE \
+      --config-file $ML2_CONF_INI_FILE upgrade juno" neutron
+  func_service restart
+}
+
+edit_conf()
+{
+  edit_config_file $NEUTRON_CONF_FILE edit_neutron_conf
+  edit_config_file $ML2_CONF_INI_FILE edit_ml2_conf
+  edit_config_file $NOVA_CONF_FILE edit_nova_conf
+  edit_config_file $L3_AGENT_INI_FILE edit_l3_agent_ini
+  edit_config_file $DHCP_AGENT_INI_FILE edit_dhcp_agent_ini
+  edit_config_file $METADATA_AGENT_INI_FILE edit_metadata_agent_ini
+}
+
+edit_neutron_conf()
+{
+  echo "[DEFAULT]"
+  echo "auth_strategy = keystone"
+  echo "core_plugin = ml2"
+  echo "service_plugins = router"
+  echo "allow_overlapping_ips = True"
+  echo "verbose = True"
+
+  echo "notify_nova_on_port_status_changes = True"
+  echo "notify_nova_on_port_data_changes = True"
+  echo "nova_url = http://$SET_NOVA_IP:8774/v2"
+  echo "nova_admin_auth_url = http://$SET_NOVA_IP:35357/v2.0"
+  echo "nova_region_name = regionOne"
+  echo "nova_admin_username = nova"
+  echo "nova_admin_tenant_id = $(keystone tenant-get service | grep id | awk '{print $4}')"
+  echo "nova_admin_password = $SET_NOVA_PASS"
+
+  $SERVICE_DATABASE"_edit_conf" $SERVICE_NAME $SET_NEUTRON_DBPASS
+
+  $SERVICE_OPENSTACK_IDENTITY"_edit_conf" $SERVICE_NAME $SET_NEUTRON_PASS
+  $SERVICE_MESSAGE_QUEUE"_edit_rpc_config"
+}
+
+edit_ml2_conf()
+{
+  echo "[ml2]"
+  echo "type_drivers = flat,gre"
+  echo "tenant_network_types = gre"
+  echo "mechanism_drivers = openvswitch"
+
+  echo "[ml2_type_flat]"
+  echo "flat_networks = external"
+
+  echo "[ml2_type_gre]"
+  echo "tunnel_id_ranges = 1:1000"
+
+  echo "[securitygroup]"
+  echo "enable_security_group = True"
+  echo "enable_ipset = True"
+  echo "firewall_driver = neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver"
+
+  echo "[ovs]"
+  echo "local_ip = $SET_NEUTRON_IP"
+  echo "tunnel_type = gre"
+  echo "enable_tunneling = True"
+  echo "bridge_mappings = external:br-ex"
+}
+
+edit_nova_conf()
+{
+  echo "[DEFAULT]"
+  echo "network_api_class = nova.network.neutronv2.api.API"
+  echo "security_group_api = neutron"
+  echo "linuxnet_interface_driver = nova.network.linux_net.LinuxOVSInterfaceDriver"
+  echo "firewall_driver = nova.virt.firewall.NoopFirewallDriver"
+
+  echo "[neutron]"
+  echo "url = http://$SET_NEUTRON_IP:9696"
+  echo "auth_strategy = keystone"
+  echo "admin_auth_url = http://$SET_NEUTRON_IP:35357/v2.0"
+  echo "admin_tenant_name = service"
+  echo "admin_username = neutron"
+  echo "admin_password = $SET_NEUTRON_PASS"
+  echo "service_metadata_proxy = True"
+  echo "metadata_proxy_shared_secret = $SET_NEUTRON_METADATA_SECRET"
+}
+
+edit_l3_agent_ini()
+{
+  echo "[DEFAULT]"
+  echo "interface_driver = neutron.agent.linux.interface.OVSInterfaceDriver"
+  echo "use_namespaces = True"
+  echo "external_network_bridge = br-ex"
+  echo "verbose = True"
+}
+
+edit_dhcp_agent_ini()
+{
+  echo "[DEFAULT]"
+  echo "interface_driver = neutron.agent.linux.interface.OVSInterfaceDriver"
+  echo "dhcp_driver = neutron.agent.linux.dhcp.Dnsmasq"
+  echo "use_namespaces = True"
+  echo "verbose = True"
+}
+
+edit_metadata_agent_ini()
+{
+  echo "[DEFAULT]"
+  echo "auth_url = ${SET_KEYSTONE_AUTH_URL_PUBLIC}"
+  echo "auth_region = regionOne"
+  echo "admin_tenant_name = service"
+  echo "admin_user = $SERVICE_NAME"
+  echo "admin_password = $SET_NOVA_PASS"
+  echo "nova_metadata_ip = $SET_NOVA_IP"
+  echo "verbose = True"
+  echo "metadata_proxy_shared_secret = $SET_NEUTRON_METADATA_SECRET"
+}
+
+create_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_create_user" $SERVICE_NAME $SET_NEUTRON_PASS
+  $SERVICE_OPENSTACK_IDENTITY"_create_service" $SERVICE_NAME network
+  $SERVICE_OPENSTACK_IDENTITY"_create_endpoint" $SERVICE_NAME \
+    http://$SET_NEUTRON_IP:9696 \
+    http://$SET_NEUTRON_IP:9696 \
+    http://$SET_NEUTRON_IP:9696
+}
+
+delete_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_delete_user" $SERVICE_NAME
+  $SERVICE_OPENSTACK_IDENTITY"_delete_service" $SERVICE_NAME
+}

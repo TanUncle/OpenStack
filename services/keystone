@@ -1,0 +1,145 @@
+#!/bin/bash
+import $SERVICE_DATABASE
+import $SERVICE_MESSAGE_QUEUE
+
+PACKAGE_LIST="keystone python-keystoneclient"
+SERVICE_LIST="keystone"
+KEYSTONE_CONF_FILE=/etc/keystone/keystone.conf
+
+func_keystone_clean()
+{
+  load_service_env
+  delete_user
+  $SERVICE_DATABASE"_drop" $SERVICE_NAME
+}
+
+func_keystone_config()
+{
+  $SERVICE_DATABASE"_create" $SERVICE_NAME $SET_KEYSTONE_DBPASS
+  edit_conf
+  sudo su -s /bin/sh -c "keystone-manage db_sync" $SERVICE_NAME
+  func_service restart
+  echo "Waiting for service keystone start..."
+  sleep 5
+
+  # delete user
+  load_service_env
+  delete_user
+  # create user
+  create_user
+  load_admin_env
+}
+
+edit_conf()
+{
+  edit_config_file $KEYSTONE_CONF_FILE edit_keystone_conf
+}
+
+edit_keystone_conf()
+{
+  echo "[DEFAULT]"
+  echo "verbose = True"
+  echo "admin_token=${SET_OS_SERVICE_TOKEN}"
+  $SERVICE_DATABASE"_edit_conf" $SERVICE_NAME $SET_KEYSTONE_DBPASS
+}
+
+create_user()
+{
+  keystone tenant-create --name $SET_KEYSTONE_ADMIN_TENANT --description "${SET_KEYSTONE_ADMIN} Tenant"
+  keystone user-create --name $SET_KEYSTONE_ADMIN --pass $SET_KEYSTONE_ADMIN_PASS
+  keystone role-create --name $SET_KEYSTONE_ADMIN_ROLE
+  keystone user-role-add --tenant $SET_KEYSTONE_ADMIN_TENANT --user $SET_KEYSTONE_ADMIN --role $SET_KEYSTONE_ADMIN_ROLE
+  keystone role-create --name _member_
+  keystone user-role-add --tenant $SET_KEYSTONE_ADMIN_TENANT --user $SET_KEYSTONE_ADMIN --role _member_
+
+  keystone tenant-create --name service
+  keystone service-create --name $SERVICE_NAME --type identity
+
+  keystone_create_endpoint $SERVICE_NAME \
+    http://$SET_KEYSTONE_IP:5000/v2.0 \
+    http://$SET_KEYSTONE_IP:5000/v2.0 \
+    http://$SET_KEYSTONE_IP:35357/v2.0
+}
+
+delete_user()
+{
+  keystone user-delete $SET_KEYSTONE_ADMIN
+  keystone service-delete $SERVICE_NAME
+  keystone tenant-delete $SET_KEYSTONE_ADMIN_TENANT
+  keystone tenant-delete service
+  keystone role-delete $SET_KEYSTONE_ADMIN_ROLE
+  keystone role-delete _member_
+}
+
+clean_expired_token()
+{
+  (crontab -l -u keystone 2>&1 | grep -q token_flush) || \
+  echo '@hourly /usr/bin/keystone-manage token_flush >/var/log/keystone/keystone-tokenflush.log 2>&1' \
+  >> /var/spool/cron/crontabs/keystone
+}
+
+# Use by other script
+
+# args: user pass
+keystone_edit_conf()
+{
+  local USER=$1
+  local PASS=$2
+
+  echo "[keystone_authtoken]"
+  echo "auth_uri = ${SET_KEYSTONE_AUTH_URL_PUBLIC}"
+  echo "identity_uri = http://${SET_KEYSTONE_IP}:35357"
+  echo "admin_tenant_name = service"
+  echo "admin_user = $USER"
+  echo "admin_password = $PASS"
+}
+
+# args: user pass
+keystone_create_user()
+{
+  load_admin_env
+  local USER=$1
+  local PASS=$2
+  local TYPE=$3
+  keystone user-create --name $USER --pass $PASS
+  keystone user-role-add --user $USER --tenant service --role $SET_KEYSTONE_ADMIN_ROLE
+}
+
+# args: service_name
+keystone_delete_user()
+{
+  local SERV_NAME=$1
+  load_admin_env
+  keystone user-delete $SERV_NAME
+}
+
+# args: service_name public_url internal_url admin_url
+keystone_create_endpoint()
+{
+  local SERV_NAME=$1
+  local PURL=$2
+  local IURL=$3
+  local AURL=$4
+
+  keystone endpoint-create \
+    --service-id $(keystone service-list | grep $SERV_NAME | awk '{print $2}') \
+    --publicurl $PURL \
+    --internalurl $IURL \
+    --adminurl $AURL \
+    --region regionOne
+}
+
+# args: service_name service_type
+keystone_create_service()
+{
+  local SERV_NAME=$1
+  local TYPE=$2
+  keystone service-create --name $SERV_NAME --type $TYPE
+}
+
+# args: service_name
+keystone_delete_service()
+{
+  local SERV_NAME=$1
+  keystone service-delete $SERV_NAME
+}

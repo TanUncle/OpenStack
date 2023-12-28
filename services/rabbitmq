@@ -1,0 +1,16 @@
+#!/bin/bash
+PACKAGE_LIST="rabbitmq-server"
+SERVICE_LIST="rabbitmq-server"
+
+func_rabbitmq_config()
+{
+  sudo rabbitmqctl change_password guest $SET_RABBITMQ_PASS
+}
+
+rabbitmq_edit_rpc_config()
+{
+  echo "[DEFAULT]"
+  echo "rpc_backend = rabbit"
+  echo "rabbit_host = $SET_RABBITMQ_IP"
+  echo "rabbit_password = $SET_RABBITMQ_PASS"
+}

@@ -1,0 +1,78 @@
+#!/bin/bash
+import $SERVICE_OPENSTACK_IDENTITY
+
+PACKAGE_LIST="nova-api nova-cert nova-conductor nova-consoleauth nova-novncproxy nova-scheduler python-novaclient nova-compute"
+SERVICE_LIST="nova-api nova-consoleauth nova-scheduler nova-conductor nova-novncproxy nova-compute"
+NOVA_CONF_FILE=/etc/nova/nova.conf
+NOVA_COMPUTE_FILE=/etc/nova/nova-compute.conf
+
+func_nova_clean()
+{
+  load_admin_env
+  delete_user
+  $SERVICE_DATABASE"_drop" $SERVICE_NAME
+}
+
+func_nova_config()
+{
+  $SERVICE_DATABASE"_create" $SERVICE_NAME $SET_NOVA_DBPASS
+  load_admin_env
+  delete_user
+  create_user
+  edit_conf
+  sudo su -s /bin/sh -c "nova-manage db sync" $SERVICE_NAME
+  func_service restart
+}
+
+edit_conf()
+{
+  edit_config_file $NOVA_CONF_FILE edit_nova_conf
+
+  if [ $(egrep -c '(vmx|svm)' /proc/cpuinfo) -eq 0 ];then
+    edit_config_file $NOVA_COMPUTE_FILE edit_nova_compute_conf
+  fi
+
+}
+
+edit_nova_conf()
+{
+  echo "[DEFAULT]"
+  echo "my_ip = $SET_CONTROLLER_IP"
+
+  echo "vnc_enabled = True"
+  echo "vncserver_listen = $SET_VNC_IP"
+  echo "vncserver_proxyclient_address = $SET_VNC_IP"
+
+  echo "novncproxy_base_url = http://$SET_VNC_CONNECT_IP:6080/vnc_auto.html"
+
+  echo "verbose = True"
+
+  echo "[glance]"
+  echo "host = $SET_VNC_IP"
+
+  $SERVICE_DATABASE"_edit_conf" $SERVICE_NAME $SET_NOVA_DBPASS
+  $SERVICE_OPENSTACK_IDENTITY"_edit_conf" $SERVICE_NAME $SET_NOVA_PASS
+  $SERVICE_MESSAGE_QUEUE"_edit_rpc_config"
+}
+
+edit_nova_compute_conf()
+{
+  echo "[libvirt]"
+  echo "virt_type = qemu"
+}
+
+create_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_create_user" $SERVICE_NAME $SET_NOVA_PASS
+  $SERVICE_OPENSTACK_IDENTITY"_create_service" $SERVICE_NAME compute
+  $SERVICE_OPENSTACK_IDENTITY"_create_endpoint" $SERVICE_NAME \
+    http://$SET_NOVA_IP:8774/v2/%\(tenant_id\)s \
+    http://$SET_NOVA_IP:8774/v2/%\(tenant_id\)s \
+    http://$SET_NOVA_IP:8774/v2/%\(tenant_id\)s
+}
+
+delete_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_delete_user" $SERVICE_NAME
+  $SERVICE_OPENSTACK_IDENTITY"_delete_service" $SERVICE_NAME
+}

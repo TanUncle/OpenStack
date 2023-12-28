@@ -1,0 +1,2 @@
+#!/bin/bash
+PACKAGE_LIST="openstack-dashboard memcached python-memcache"

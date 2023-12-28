@@ -1,0 +1,35 @@
+#!/bin/bash
+import $SERVICE_OPENSTACK_COMPUTE
+
+PACKAGE_LIST="nova-network"
+SERVICE_LIST="nova-api nova-scheduler nova-conductor nova-network"
+
+func_nova-network_config()
+{
+  edit_conf
+  func_service restart
+}
+
+edit_conf()
+{
+  edit_config_file $NOVA_CONF_FILE edit_nova_network_conf
+}
+
+edit_nova_network_conf()
+{
+  echo "[DEFAULT]"
+  echo "network_api_class = nova.network.api.API"
+  echo "security_group_api = nova"
+  echo "firewall_driver = nova.virt.libvirt.firewall.IptablesFirewallDriver"
+  echo "network_manager = nova.network.manager.FlatDHCPManager"
+  echo "network_size = 254"
+  echo "allow_same_net_traffic = False"
+  echo "multi_host = True"
+  echo "send_arp_for_ha = True"
+  echo "share_dhcp_address = True"
+  echo "force_dhcp_release = True"
+  echo "flat_network_bridge = br100"
+  echo "flat_interface = ${SET_INTERFACE_NAME}"
+  echo "public_interface = ${SET_INTERFACE_NAME}"
+  echo "verbose = True"
+}

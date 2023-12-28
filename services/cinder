@@ -1,0 +1,64 @@
+#!/bin/bash
+import $SERVICE_OPENSTACK_IDENTITY
+
+PACKAGE_LIST="cinder-api cinder-scheduler python-cinderclient cinder-volume"
+SERVICE_LIST="cinder-scheduler cinder-api cinder-volume tgt"
+CINDER_CONF_FILE=/etc/cinder/cinder.conf
+
+func_cinder_clean()
+{
+  load_admin_env
+  delete_user
+  $SERVICE_DATABASE"_drop" $SERVICE_NAME
+}
+
+func_cinder_config()
+{
+  $SERVICE_DATABASE"_create" $SERVICE_NAME $SET_CINDER_DBPASS
+  load_admin_env
+  delete_user
+  create_user
+  edit_conf
+  sudo su -s /bin/sh -c "cinder-manage db sync" $SERVICE_NAME
+  func_service restart
+}
+
+edit_conf()
+{
+  edit_config_file $CINDER_CONF_FILE edit_cinder_conf
+}
+
+edit_cinder_conf()
+{
+  echo "[DEFAULT]"
+  echo "my_ip = $SET_CINDER_IP"
+  echo "glance_host = $SET_CINDER_IP"
+  echo "verbose = True"
+
+  $SERVICE_DATABASE"_edit_conf" $SERVICE_NAME $SET_CINDER_DBPASS
+  $SERVICE_OPENSTACK_IDENTITY"_edit_conf" $SERVICE_NAME $SET_CINDER_PASS
+  $SERVICE_MESSAGE_QUEUE"_edit_rpc_config"
+}
+
+create_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_create_user" $SERVICE_NAME $SET_CINDER_PASS
+  $SERVICE_OPENSTACK_IDENTITY"_create_service" $SERVICE_NAME volume
+  $SERVICE_OPENSTACK_IDENTITY"_create_endpoint" $SERVICE_NAME \
+    http://$SET_CINDER_IP:8776/v1/%\(tenant_id\)s \
+    http://$SET_CINDER_IP:8776/v1/%\(tenant_id\)s \
+    http://$SET_CINDER_IP:8776/v1/%\(tenant_id\)s
+
+  $SERVICE_OPENSTACK_IDENTITY"_create_service" $SERVICE_NAME"v2" volumev2
+  $SERVICE_OPENSTACK_IDENTITY"_create_endpoint" $SERVICE_NAME"v2" \
+    http://$SET_CINDER_IP:8776/v2/%\(tenant_id\)s \
+    http://$SET_CINDER_IP:8776/v2/%\(tenant_id\)s \
+    http://$SET_CINDER_IP:8776/v2/%\(tenant_id\)s
+}
+
+delete_user()
+{
+  $SERVICE_OPENSTACK_IDENTITY"_delete_user" $SERVICE_NAME
+  $SERVICE_OPENSTACK_IDENTITY"_delete_service" $SERVICE_NAME"v2"
+  $SERVICE_OPENSTACK_IDENTITY"_delete_service" $SERVICE_NAME
+}
